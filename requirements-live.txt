@@ -1,0 +1,5 @@
+# Only needed for LIVE trading. Paper mode runs without these.
+# If this fails to install on your machine, the desk still runs — live mode
+# simply refuses to arm and tells you why.
+solders>=0.21
+base58>=2.1

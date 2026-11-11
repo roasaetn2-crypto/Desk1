@@ -1,0 +1,14 @@
+fastapi>=0.110
+uvicorn>=0.27
+pydantic>=2.7
+requests>=2.31
+
+# FastAPI needs this for Form(...) fields. Without it the app refuses to boot
+# with: "Form data requires 'python-multipart' to be installed."
+python-multipart>=0.0.9
+
+# No model SDK is required. The brain talks to providers over plain HTTP
+# (desk/brain.py), so a free key or a local Ollama is enough.
+#
+# Optional, only if you want Claude:
+#   pip install anthropic

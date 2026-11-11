@@ -1,0 +1,337 @@
+"""FastAPI server: the dashboard's window into the Solana Agent.
+
+    ./run.sh                 # locked, random token printed
+    ./run.sh mypassword      # locked with your token
+    ./run.sh --open          # no lock at all
+
+Access control
+    Two ways in:
+
+    1. A PAIRED DEVICE. Pair once with the key; that browser then holds a
+       long-lived HttpOnly cookie and opens the desk with no key. This is
+       how "only my phone gets in" works.
+    2. THE KEY. Any other device can still get in by typing DESK_TOKEN.
+
+    With no DESK_TOKEN the desk is open to anyone who can reach the port.
+
+Endpoints
+    GET  /                     the dashboard
+    GET  /login                key form + "pair this device"
+    POST /login                sets the master session cookie
+    POST /pair                 pairs this browser as a device (needs the key)
+    GET  /logout               clears both cookies
+    GET  /devices              list paired devices, revoke them
+    GET  /api/state            full agent + broker + event snapshot
+    GET  /api/devices          paired device list (JSON)
+    DELETE /api/devices/{id}   revoke one device
+    POST /api/agent/start      start the background loop
+    POST /api/agent/stop       pause the background loop
+    POST /api/agent/step       run exactly one cycle (query: ?demo=1)
+    POST /api/agent/reset      reset paper equity + bench + log
+    GET  /api/mode             paper or live, caps, wallet, arming state
+    POST /api/mode             switch mode (live needs the confirm phrase)
+    POST /api/kill             trip the kill switch (close all, stop)
+    DELETE /api/kill           clear the kill switch
+"""
+from __future__ import annotations
+
+import hashlib
+import hmac
+import os
+from pathlib import Path
+
+from fastapi import Body, FastAPI, Form, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+
+from desk import devices
+from desk.ops import KILL_FILE, load_env
+from desk.solana_agent import SolanaAgent
+
+load_env()
+
+app = FastAPI(title="AI Trading Desk \u2014 Solana Agent", version="1.3.0")
+agent = SolanaAgent()
+
+WEB = Path(__file__).parent / "web"
+app.mount("/static", StaticFiles(directory=WEB), name="static")
+
+SESSION_COOKIE = "desk_session"
+DEVICE_COOKIE = "desk_device"
+
+DESK_TOKEN = os.environ.get("DESK_TOKEN", "").strip()
+_SESSION = hashlib.sha256(("desk::" + DESK_TOKEN).encode()).hexdigest() if DESK_TOKEN else ""
+
+PUBLIC_PATHS = {"/login", "/logout", "/pair", "/api/health"}
+
+
+def _master(request: Request) -> bool:
+    if not DESK_TOKEN:
+        return True
+    return hmac.compare_digest(request.cookies.get(SESSION_COOKIE, ""), _SESSION)
+
+
+def _device(request: Request) -> dict | None:
+    return devices.verify(request.cookies.get(DEVICE_COOKIE, ""))
+
+
+def _authed(request: Request) -> bool:
+    if not DESK_TOKEN:
+        return True
+    return _master(request) or _device(request) is not None
+
+
+LOGIN_HTML = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#080c12" />
+<title>Unlock \u2014 Solana Desk</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;
+       background:#080c12;color:#e6edf5;
+       font-family:Inter,system-ui,-apple-system,sans-serif;padding:20px}
+  .card{width:100%;max-width:360px;background:#0d131b;border:1px solid #1c2735;
+        border-radius:14px;padding:26px 22px}
+  h1{font-size:16px;margin:0 0 4px;letter-spacing:.2px}
+  .sub{font-size:12px;color:#7d8ea3;margin:0 0 20px;line-height:1.5}
+  label{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;
+        color:#6b7c91;font-weight:600;margin:0 0 6px}
+  input{width:100%;padding:11px 12px;border-radius:9px;border:1px solid #1c2735;
+        background:#0a0f16;color:#e6edf5;font-size:14px;font-family:inherit;margin-bottom:14px}
+  input:focus{outline:none;border-color:#2ee59d}
+  button{width:100%;padding:11px;border-radius:9px;border:0;
+         background:linear-gradient(180deg,#2ee59d,#1fbf82);color:#04110b;
+         font-weight:700;font-size:13.5px;font-family:inherit;cursor:pointer}
+  button.ghost{background:#131c27;color:#c3d0de;border:1px solid #1c2735;margin-top:8px}
+  .err{margin-top:12px;font-size:12px;color:#ff4d6d}
+  .ok{margin-top:12px;font-size:12px;color:#2ee59d;line-height:1.5}
+  .div{display:flex;align-items:center;gap:10px;margin:20px 0 16px;color:#3d4d61;
+       font-size:10px;text-transform:uppercase;letter-spacing:1px}
+  .div:before,.div:after{content:"";flex:1;height:1px;background:#1c2735}
+</style></head>
+<body>
+  <div class="card">
+    <h1>\U0001f6f0\ufe0f Solana Desk</h1>
+    <p class="sub">This desk is locked. Enter the key, or pair this device so it never asks again.</p>
+
+    <form method="post" action="/login">
+      <label>Access key</label>
+      <input type="password" name="token" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+             autofocus autocomplete="current-password" />
+      <button type="submit">Unlock</button>
+    </form>
+
+    <div class="div">or</div>
+
+    <form method="post" action="/pair">
+      <label>Pair this device</label>
+      <input type="text" name="name" placeholder="Device name (e.g. Pixel 7)" />
+      <input type="password" name="token" placeholder="Access key (one time)" />
+      <button class="ghost" type="submit">Pair &amp; stay signed in</button>
+    </form>
+    __ERROR__
+  </div>
+</body></html>"""
+
+DEVICES_HTML = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#080c12" />
+<title>Devices \u2014 Solana Desk</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#080c12;color:#e6edf5;padding:22px 16px 60px;
+       font-family:Inter,system-ui,-apple-system,sans-serif}
+  .wrap{max-width:640px;margin:0 auto}
+  h1{font-size:17px;margin:0 0 4px}
+  p.s{font-size:12px;color:#7d8ea3;margin:0 0 22px;line-height:1.5}
+  .row{display:flex;align-items:center;gap:12px;background:#0d131b;border:1px solid #1c2735;
+       border-radius:11px;padding:13px 15px;margin-bottom:9px}
+  .row .n{font-weight:700;font-size:13.5px}
+  .row .m{font-size:11px;color:#6b7c91;margin-top:2px}
+  .row .sp{flex:1}
+  .row form{margin:0}
+  .rev{background:#1a1116;color:#ff4d6d;border:1px solid rgba(255,77,109,.3);
+       border-radius:8px;padding:7px 12px;font-size:11.5px;font-weight:600;cursor:pointer;
+       font-family:inherit}
+  .empty{color:#5a6a7d;font-size:12.5px;padding:18px 0}
+  a{color:#2ee59d;font-size:12.5px;text-decoration:none}
+</style></head><body><div class="wrap">
+  <h1>Paired devices</h1>
+  <p class="s">These browsers open the desk without a key. Revoke any you do not recognise.</p>
+  __ROWS__
+  <p style="margin-top:26px"><a href="/">\u2190 back to the desk</a></p>
+</div></body></html>"""
+
+
+@app.middleware("http")
+async def gate(request: Request, call_next):
+    path = request.url.path
+    if path in PUBLIC_PATHS or path.startswith("/static"):
+        return await call_next(request)
+    if _authed(request):
+        return await call_next(request)
+    if path.startswith("/api/"):
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return RedirectResponse("/login", status_code=303)
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_form(error: int = 0):
+    if not DESK_TOKEN:
+        return RedirectResponse("/", status_code=303)
+    body = LOGIN_HTML.replace(
+        "__ERROR__", '<div class="err">Wrong key. Try again.</div>' if error else ""
+    )
+    return body
+
+
+@app.post("/login", response_class=HTMLResponse)
+def login_submit(token: str = Form("")):
+    if not DESK_TOKEN:
+        return RedirectResponse("/", status_code=303)
+    if not hmac.compare_digest(token.strip(), DESK_TOKEN):
+        return RedirectResponse("/login?error=1", status_code=303)
+    resp = RedirectResponse("/", status_code=303)
+    resp.set_cookie(SESSION_COOKIE, _SESSION, httponly=True, samesite="lax",
+                    max_age=60 * 60 * 24 * 7)
+    return resp
+
+
+@app.post("/pair", response_class=HTMLResponse)
+def pair_device(name: str = Form(""), token: str = Form("")):
+    """Bind this browser to the desk. Requires the key once."""
+    if not DESK_TOKEN:
+        return RedirectResponse("/", status_code=303)
+    if not hmac.compare_digest(token.strip(), DESK_TOKEN):
+        return RedirectResponse("/login?error=1", status_code=303)
+    raw, rec = devices.pair(name or "unnamed device")
+    resp = RedirectResponse("/", status_code=303)
+    # One year, HttpOnly: the token never touches JavaScript.
+    resp.set_cookie(DEVICE_COOKIE, raw, httponly=True, samesite="lax",
+                    max_age=60 * 60 * 24 * 365)
+    resp.set_cookie(SESSION_COOKIE, _SESSION, httponly=True, samesite="lax",
+                    max_age=60 * 60 * 24 * 7)
+    print(f"[desk] paired device {rec['id']} \u2014 {rec['name']}")
+    return resp
+
+
+@app.get("/logout")
+def logout():
+    resp = RedirectResponse("/login", status_code=303)
+    resp.delete_cookie(SESSION_COOKIE)
+    resp.delete_cookie(DEVICE_COOKIE)
+    return resp
+
+
+@app.get("/devices", response_class=HTMLResponse)
+def devices_page():
+    rows = devices.listing()
+    if not rows:
+        body = '<div class="empty">No devices paired yet. Use \u201cPair this device\u201d on the login screen.</div>'
+    else:
+        body = "".join(
+            f'<div class="row"><div><div class="n">{r["name"]}</div>'
+            f'<div class="m">id {r["id"]} \u00b7 paired {r["created"][:10]} \u00b7 last seen {r["last_seen"][:16].replace("T", " ")}</div></div>'
+            f'<div class="sp"></div>'
+            f'<form method="post" action="/devices/{r["id"]}/revoke">'
+            f'<button class="rev" type="submit">Revoke</button></form></div>'
+            for r in rows
+        )
+    return DEVICES_HTML.replace("__ROWS__", body)
+
+
+@app.post("/devices/{device_id}/revoke")
+def revoke_device(device_id: str):
+    devices.revoke(device_id)
+    return RedirectResponse("/devices", status_code=303)
+
+
+@app.get("/api/devices")
+def api_devices():
+    return {"devices": devices.listing()}
+
+
+@app.delete("/api/devices/{device_id}")
+def api_revoke(device_id: str):
+    return {"ok": devices.revoke(device_id), "id": device_id}
+
+
+@app.get("/")
+def index():
+    return FileResponse(WEB / "index.html")
+
+
+@app.get("/api/state")
+def state(request: Request):
+    snap = agent.status()
+    dev = _device(request)
+    snap["access"] = {
+        "locked": bool(DESK_TOKEN),
+        "mode": "device" if dev else ("key" if _master(request) else "open"),
+        "device": dev["name"] if dev else None,
+        "paired_devices": devices.count(),
+    }
+    return JSONResponse(snap)
+
+
+@app.get("/api/health")
+def health():
+    return {"ok": True, "running": agent.running, "cycle": agent.cycle_no}
+
+
+@app.get("/api/mode")
+def get_mode():
+    return agent.mode_info()
+
+
+@app.post("/api/mode")
+def set_mode(payload: dict = Body(...)):
+    return agent.set_mode(str(payload.get("mode", "")), str(payload.get("confirm", "")))
+
+
+@app.post("/api/agent/start")
+def start():
+    return agent.start()
+
+
+@app.post("/api/agent/stop")
+def stop():
+    return agent.stop()
+
+
+@app.post("/api/agent/step")
+def step(demo: int = 0):
+    return agent.run_once(force_demo=bool(demo))
+
+
+@app.post("/api/agent/reset")
+def reset():
+    return agent.reset()
+
+
+@app.post("/api/kill")
+def kill():
+    KILL_FILE.write_text("stop")
+    agent.stop()
+    return {"ok": True, "message": "kill switch tripped, agent stopped"}
+
+
+@app.delete("/api/kill")
+def clear_kill():
+    if KILL_FILE.exists():
+        KILL_FILE.unlink()
+    return {"ok": True, "message": "kill switch cleared"}
+
+
+if not DESK_TOKEN:
+    print("[desk] WARNING: DESK_TOKEN is not set \u2014 this desk is OPEN to anyone who can reach the port.")
+else:
+    print(f"[desk] locked: key required, {devices.count()} device(s) paired.")
+from desk import brain as _brain
+from desk import live as _live
+_ok, _why = _live.ready()
+print(f"[desk] execution: paper by default. live signing: "
+      f"{'available' if _ok else 'unavailable'} ({_why})")
+print(f"[desk] brain: {_brain.describe()}" + (" (free)" if _brain.health()["free"] else ""))

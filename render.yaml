@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: solana-desk
+    runtime: python
+    plan: free
+    buildCommand: pip install --no-cache-dir -r requirements.txt
+    startCommand: bash start.sh
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DESK_TOKEN
+        sync: false          # you type this in the Render dashboard, never in git
+      - key: PYTHONUNBUFFERED
+        value: "1"

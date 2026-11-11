@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Trading Desk — Solana Agent</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9B%B0%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <meta name="theme-color" content="#080c12" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Solana Desk" />
+  <link rel="manifest" href="/static/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/static/assets/icon-192.png" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="mark">S</div>
+      <div>
+        <div class="title">AI Trading Desk</div>
+        <div class="sub">Solana Agent · meme desk · paper / live</div>
+      </div>
+    </div>
+
+    <span class="pill" id="statusPill"><span class="dot"></span><span id="statusText">idle</span></span>
+    <span class="pill" id="modePill" title="execution mode"><span class="dot"></span><span id="modeText">paper</span></span>
+    <span class="pill" id="sourcePill"><span class="dot"></span><span id="sourceText">source: —</span></span>
+    <a class="pill" id="lockPill" href="/devices" title="access control" style="text-decoration:none"><span class="dot"></span><span id="lockText">access: —</span></a>
+
+    <div class="spacer"></div>
+
+    <div class="equity-block">
+      <div class="metric">
+        <div class="k" id="equityLabel">Equity</div>
+        <div class="v" id="topEquity">$1,000.00</div>
+      </div>
+      <div class="metric">
+        <div class="k">Day P&amp;L</div>
+        <div class="v" id="topPnl">$0.00</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn primary" id="btnStart">▶ Start agent</button>
+      <button class="btn" id="btnStep">Step once</button>
+      <button class="btn warn" id="btnPause">Pause</button>
+      <button class="btn" id="btnReset">Reset</button>
+      <button class="btn danger" id="btnKill">Kill</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- LEFT: pipeline + agent stats + playbook -->
+    <section class="col col-left">
+      <div class="panel">
+        <div class="panel-head">
+          <span class="icon">🛰️</span>
+          <h2>The seats</h2>
+          <span class="badge" id="cycleBadge">cycle 0</span>
+        </div>
+        <div class="pipeline" id="pipeline">
+          <div class="seat" data-seat="scanner">
+            <div class="num">1</div>
+            <div class="meta"><div class="name">Scanner</div><div class="desc">GeckoTerminal new Solana pools</div></div>
+            <div class="count"><b id="cSeen">0</b> seen</div>
+          </div>
+          <div class="seat" data-seat="chain">
+            <div class="num">2</div>
+            <div class="meta"><div class="name">Chain facts</div><div class="desc">mint · freeze · real top 10</div></div>
+            <div class="count"><b id="cChain">0</b> cut</div>
+          </div>
+          <div class="seat" data-seat="dev">
+            <div class="num">2b</div>
+            <div class="meta"><div class="name">Dev investigation</div><div class="desc">creator hold · rugs · snipers</div></div>
+            <div class="count"><b id="cDev">0</b> cut</div>
+          </div>
+          <div class="seat" data-seat="meme">
+            <div class="num">2c</div>
+            <div class="meta"><div class="name">Meme value</div><div class="desc">community · narrative · utility</div></div>
+            <div class="count"><b id="cMeme">0</b> cut</div>
+          </div>
+          <div class="seat" data-seat="analyst">
+            <div class="num">3</div>
+            <div class="meta"><div class="name">Analyst</div><div class="desc" id="analystDesc">typed thesis 0–10</div></div>
+            <div class="count"><b id="cAnalyst">0</b> calls</div>
+          </div>
+          <div class="seat" data-seat="risk">
+            <div class="num">4</div>
+            <div class="meta"><div class="name">Risk engine</div><div class="desc">size · limits · daily stop</div></div>
+            <div class="count"><b id="cRisk">0</b> veto</div>
+          </div>
+          <div class="seat" data-seat="broker">
+            <div class="num">5</div>
+            <div class="meta"><div class="name">Paper broker</div><div class="desc" id="brokerDesc">fills · exits · journal</div></div>
+            <div class="count"><b id="cEntries">0</b> fills</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="execPanel">
+        <div class="panel-head"><span class="icon">🔀</span><h2>Execution mode</h2><span class="badge" id="modeBadge">PAPER</span></div>
+        <div class="panel-body">
+          <div class="tiny muted" id="modeBlurb">Paper fills only. No key, no signing, no real money can move.</div>
+          <div class="stat-grid" style="margin-top:10px">
+            <div class="stat"><div class="k">Wallet</div><div class="v" id="modeWallet" style="font-size:12px">—</div></div>
+            <div class="stat"><div class="k">Live P&L</div><div class="v" id="modeLivePnl">$0.00</div></div>
+            <div class="stat"><div class="k">Per trade cap</div><div class="v" id="capTrade">—</div></div>
+            <div class="stat"><div class="k">Total cap</div><div class="v" id="capNotional">—</div></div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" id="btnPaper">Use paper</button>
+            <button class="btn danger" id="btnArm">Arm live…</button>
+          </div>
+          <div id="armBox" style="display:none;margin-top:10px">
+            <div class="tiny" style="color:var(--amber);margin-bottom:6px">Real money. Type the phrase exactly as shown, then confirm.</div>
+            <div class="tiny muted" id="armPhraseHint" style="margin-bottom:6px;font-family:var(--mono)">—</div>
+            <input id="armPhrase" placeholder="type the phrase" autocomplete="off" spellcheck="false"
+                   style="width:100%;padding:9px;border-radius:8px;border:1px solid var(--border);background:var(--bg-2);color:var(--text);font-family:var(--mono);font-size:13px" />
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button class="btn danger" id="btnArmGo">Arm live</button>
+              <button class="btn" id="btnArmCancel">Cancel</button>
+            </div>
+          </div>
+          <div class="tiny" id="modeMsg" style="margin-top:8px"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="icon">📊</span><h2>Agent stats</h2></div>
+        <div class="panel-body">
+          <div class="stat-grid">
+            <div class="stat"><div class="k">Cycles</div><div class="v" id="sCycles">0</div></div>
+            <div class="stat"><div class="k">Pools seen</div><div class="v" id="sSeen">0</div></div>
+            <div class="stat"><div class="k">Free cuts</div><div class="v" id="sFree">0</div></div>
+            <div class="stat"><div class="k">Chain cuts</div><div class="v" id="sChain">0</div></div>
+            <div class="stat"><div class="k">Dev cuts</div><div class="v" id="sDev">0</div></div>
+            <div class="stat"><div class="k">Meme cuts</div><div class="v" id="sMeme">0</div></div>
+            <div class="stat"><div class="k">Theses</div><div class="v" id="sTheses">0</div></div>
+            <div class="stat"><div class="k">Dialogues</div><div class="v" id="sDialogues">0</div></div>
+            <div class="stat"><div class="k">Entries</div><div class="v" id="sEntries">0</div></div>
+            <div class="stat"><div class="k">Exits</div><div class="v" id="sExits">0</div></div>
+            <div class="stat"><div class="k">Errors</div><div class="v" id="sErrors">0</div></div>
+          </div>
+          <div class="tiny muted" style="margin-top:12px" id="analystLine">Brain: —</div>
+          <div class="tiny muted" style="margin-top:4px" id="rpcLine">RPC: —</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="icon">📐</span><h2>Hold horizon</h2><span class="badge" id="horizonBadge">—</span></div>
+        <div class="panel-body">
+          <img class="playbook" src="/static/assets/timeframe.jpg" alt="Match your timeframe to how long you hold" />
+          <div class="tiny muted" style="margin-top:10px">
+            A fresh launch is not traded on a weekly chart. The desk states the horizon
+            before it sizes a ticket.
+          </div>
+          <div class="horizon" id="horizon">
+            <div class="hrow"><span>Hold</span><b id="hHold">—</b></div>
+            <div class="hrow"><span>Chart</span><b id="hChart">—</b></div>
+            <div class="hrow"><span>Rule</span><b id="hRule">—</b></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CENTER: KPIs, positions, decisions, dialogue -->
+    <section class="col col-center">
+      <div class="kpis">
+        <div class="kpi" style="--accent: var(--green)">
+          <div class="k">Equity</div><div class="v" id="kEquity">$1,000.00</div>
+          <div class="s">paper account</div>
+        </div>
+        <div class="kpi" style="--accent: var(--blue)">
+          <div class="k">Day P&amp;L</div><div class="v" id="kPnl">$0.00</div>
+          <div class="s" id="kPnlPct">0.00%</div>
+        </div>
+        <div class="kpi" style="--accent: var(--purple)">
+          <div class="k">Open positions</div><div class="v" id="kOpen">0</div>
+          <div class="s" id="kOpenMax">max 3</div>
+        </div>
+        <div class="kpi" style="--accent: var(--amber)">
+          <div class="k">Win rate</div><div class="v" id="kWin">—</div>
+          <div class="s" id="kClosed">0 closed</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="icon">💼</span><h2>Open positions</h2><span class="badge" id="posBadge">0</span></div>
+        <div class="panel-body" style="padding: 12px 10px">
+          <table>
+            <thead><tr><th>Symbol</th><th>Entry</th><th>Last</th><th>P&amp;L</th><th>Cost</th><th>Held</th></tr></thead>
+            <tbody id="posBody"><tr><td colspan="6" class="empty">No open positions. Start the agent.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="icon">🧠</span><h2>Recent decisions</h2><span class="badge" id="decBadge">0</span></div>
+        <div class="panel-body" style="padding: 12px 10px">
+          <table>
+            <thead><tr><th>Symbol</th><th>Verdict</th><th>Score</th><th>Meme</th><th>Dev</th><th>Ticket</th><th>Reason</th></tr></thead>
+            <tbody id="decBody"><tr><td colspan="7" class="empty">No decisions yet.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="icon">💬</span><h2>Seat dialogue</h2><span class="badge" id="dlgBadge">template</span></div>
+        <div class="panel-body" style="padding: 8px 10px">
+          <div class="dialogue" id="dialogue"><div class="empty">The seats have not spoken yet.</div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="icon">📜</span><h2>Agent log</h2><span class="badge">live</span></div>
+        <div class="panel-body" style="padding: 8px 10px">
+          <div class="log" id="log"><div class="empty">Waiting for the agent…</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT: scorecard, dev report, thesis, rules -->
+    <section class="col col-right">
+      <div class="panel">
+        <div class="panel-head"><span class="icon">🪙</span><h2>Meme value scorecard</h2><span class="badge" id="memeBadge">—</span></div>
+        <div class="panel-body">
+          <div class="meme-total"><b id="memeTotal">—</b><span>/100</span><em id="memeVerdict">no coin yet</em></div>
+          <div class="bars" id="memeBars"><div class="empty">Run a cycle to score a coin.</div></div>
+          <div class="tiny muted" style="margin-top:10px" id="memeNarrative">Narrative: —</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="icon">🕵️</span><h2>Dev investigation</h2><span class="badge" id="devBadge">—</span></div>
+        <div class="panel-body">
+          <div class="stat-grid">
+            <div class="stat"><div class="k">Dev score</div><div class="v" id="devScore">—</div></div>
+            <div class="stat"><div class="k">Creator holds</div><div class="v" id="devHold">—</div></div>
+            <div class="stat"><div class="k">Prior rugs</div><div class="v" id="devRugs">—</div></div>
+            <div class="stat"><div class="k">Snipers</div><div class="v" id="devSnipers">—</div></div>
+          </div>
+          <ul class="reasons" id="devReasons"><li class="empty">No investigation yet.</li></ul>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="icon">🔎</span><h2>Analyst theses</h2></div>
+        <div class="panel-body">
+          <div class="thesis-list" id="theses"><div class="empty">No theses yet.</div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="icon">🛡️</span><h2>Risk rules</h2></div>
+        <div class="panel-body">
+          <div class="stat-grid">
+            <div class="stat"><div class="k">Min score</div><div class="v" id="cfgScore">7</div></div>
+            <div class="stat"><div class="k">Max positions</div><div class="v" id="cfgMax">3</div></div>
+            <div class="stat"><div class="k">Stop</div><div class="v" id="cfgStop">-35%</div></div>
+            <div class="stat"><div class="k">Take half</div><div class="v" id="cfgTake">2.0x</div></div>
+          </div>
+          <div class="tiny muted" style="margin-top:12px">
+            The model never sizes a trade. Code does. The smallest of three caps wins:
+            risk, position size, and 2% of pool liquidity.
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
